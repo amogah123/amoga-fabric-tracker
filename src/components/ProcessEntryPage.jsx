@@ -7,21 +7,19 @@ import { YarnEntryForm, ProcessEntryForm, InhouseEntryForm } from './EntryForms'
 
 export default function ProcessEntryPage({ showToast }) {
   const navigate = useNavigate()
-  const [orders, setOrders] = useState(null)
+  const [allData, setAllData] = useState(null)
   const [error, setError] = useState(null)
   const [orderId, setOrderId] = useState('')
   const [stage, setStage] = useState('Yarn Received')
   const [orderData, setOrderData] = useState(null)
   const [loadingDetail, setLoadingDetail] = useState(false)
 
-  // Load open orders for dropdown
   useEffect(() => {
     fetchAllOrderData()
-      .then(d => setOrders(d))
+      .then(d => setAllData(d))
       .catch(e => setError(e.message))
   }, [])
 
-  // Load order detail when selected
   useEffect(() => {
     if (!orderId) { setOrderData(null); return }
     setLoadingDetail(true)
@@ -31,31 +29,31 @@ export default function ProcessEntryPage({ showToast }) {
       .finally(() => setLoadingDetail(false))
   }, [orderId])
 
-  const handleDone = (msg) => {
-    showToast(msg)
-    // Reload detail
-    fetchOrderFull(orderId).then(setOrderData)
-  }
+  const openOrders = useMemo(() => {
+    if (!allData) return []
+    return allData.orders.filter(o => !allData.inhouses.find(i => i.order_id === o.id))
+  }, [allData])
 
-  if (error) return <div className="page"><ErrorBox message={error} /></div>
-  if (!orders) return <div className="page"><Loading /></div>
+  const yarn = orderData?.yarn || null
+  const existingProc = orderData ? (orderData.processes || []).find(p => p.process_name === stage) || null : null
+  const existingInhouse = orderData?.inhouse || null
 
-  const openOrders = orders.orders.filter(o => !orders.inhouses.find(i => i.order_id === o.id))
-
-  // Derive existing entries from loaded detail
-  const yarn = orderData?.yarn
-  const existingProc = orderData ? orderData.processes.find(p => p.process_name === stage) : null
-  const existingInhouse = orderData?.inhouse
-
-  // Suggested inward from previous stage
   const suggestedInward = useMemo(() => {
     if (!orderData || stage === 'Yarn Received') return null
     if (stage === 'Knitting') return yarn?.yarn_kgs
     const idx = PROCESS_STAGES.indexOf(stage)
     if (idx <= 0) return null
-    const prev = orderData.processes.find(p => p.process_name === PROCESS_STAGES[idx - 1])
+    const prev = (orderData.processes || []).find(p => p.process_name === PROCESS_STAGES[idx - 1])
     return prev?.outward_kgs
-  }, [stage, orderData])
+  }, [stage, orderData, yarn])
+
+  const handleDone = (msg) => {
+    showToast(msg)
+    if (orderId) fetchOrderFull(orderId).then(setOrderData)
+  }
+
+  if (error) return <div className="page"><ErrorBox message={error} /></div>
+  if (!allData) return <div className="page"><Loading /></div>
 
   return (
     <div className="page">
@@ -107,7 +105,7 @@ export default function ProcessEntryPage({ showToast }) {
           </>
         )}
 
-        {loadingDetail && <div style={{ padding: '24px', textAlign: 'center', color: 'var(--ink-40)' }}>Loading order…</div>}
+        {loadingDetail && <div style={{ padding: '24px', textAlign: 'center', color: 'var(--ink-40)' }}>Loading order...</div>}
       </div>
     </div>
   )
