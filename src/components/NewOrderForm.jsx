@@ -10,7 +10,7 @@ export default function NewOrderForm({ showToast }) {
   const [f, setF] = useState({
     buyer_name: '', buyer_po: '', fabric_name: '', composition: '',
     gsm: '', colour: '', width: '', required_kgs: '', required_meters: '',
-    order_date: today(), target_date: ''
+    order_date: today(), target_date: '', dyeing_stenter_combined: false
   })
   const upd = (k, v) => setF(s => ({ ...s, [k]: v }))
 
@@ -19,25 +19,18 @@ export default function NewOrderForm({ showToast }) {
     setSaving(true)
     try {
       const order = await createOrder({
-        buyer_name: f.buyer_name,
-        buyer_po: f.buyer_po || null,
-        fabric_name: f.fabric_name,
-        composition: f.composition || null,
-        gsm: f.gsm ? Number(f.gsm) : null,
-        colour: f.colour || null,
+        buyer_name: f.buyer_name, buyer_po: f.buyer_po || null,
+        fabric_name: f.fabric_name, composition: f.composition || null,
+        gsm: f.gsm ? Number(f.gsm) : null, colour: f.colour || null,
         width: f.width || null,
         required_kgs: f.required_kgs ? Number(f.required_kgs) : null,
         required_meters: f.required_meters ? Number(f.required_meters) : null,
-        order_date: f.order_date,
-        target_date: f.target_date || null,
+        order_date: f.order_date, target_date: f.target_date || null,
+        dyeing_stenter_combined: f.dyeing_stenter_combined,
       })
-      showToast('Order created')
+      showToast('Order created — now allocate grey fabric')
       navigate(`/orders/${order.id}`)
-    } catch (e) {
-      alert('Error: ' + e.message)
-    } finally {
-      setSaving(false)
-    }
+    } catch (e) { alert('Error: ' + e.message) } finally { setSaving(false) }
   }
 
   return (
@@ -50,14 +43,24 @@ export default function NewOrderForm({ showToast }) {
           <Field label="Buyer Name *" value={f.buyer_name} onChange={v => upd('buyer_name', v)} placeholder="e.g. Celio" />
           <Field label="Buyer PO Reference" value={f.buyer_po} onChange={v => upd('buyer_po', v)} mono />
           <Field label="Fabric Name *" value={f.fabric_name} onChange={v => upd('fabric_name', v)} placeholder="e.g. Single Jersey" />
-          <Field label="Composition" value={f.composition} onChange={v => upd('composition', v)} placeholder="e.g. 95% Cotton 5% Elastane" />
+          <Field label="Composition" value={f.composition} onChange={v => upd('composition', v)} placeholder="e.g. 95% Cotton 5% Lycra" />
           <Field label="GSM" value={f.gsm} onChange={v => upd('gsm', v)} type="number" mono />
           <Field label="Colour" value={f.colour} onChange={v => upd('colour', v)} />
-          <Field label="Dia / Width" value={f.width} onChange={v => upd('width', v)} placeholder="e.g. 36 inch open" />
+          <Field label="Dia / Width" value={f.width} onChange={v => upd('width', v)} placeholder='e.g. 36" open' />
           <Field label="Required Qty (Kgs)" value={f.required_kgs} onChange={v => upd('required_kgs', v)} type="number" mono />
           <Field label="Required Qty (Meters)" value={f.required_meters} onChange={v => upd('required_meters', v)} type="number" mono />
           <Field label="Target Inhouse Date" type="date" value={f.target_date} onChange={v => upd('target_date', v)} />
         </div>
+
+        <label className="toggle-row">
+          <input type="checkbox" checked={f.dyeing_stenter_combined}
+            onChange={e => upd('dyeing_stenter_combined', e.target.checked)} />
+          <div>
+            <div className="toggle-label">Dyeing + Stentering done together</div>
+            <div className="toggle-help">Tick this if the same unit does both — they become ONE entry instead of two.</div>
+          </div>
+        </label>
+
         <div className="form-actions">
           <button className="btn-ghost" onClick={() => navigate('/orders')}>Cancel</button>
           <button className="btn-primary" onClick={save} disabled={saving}>

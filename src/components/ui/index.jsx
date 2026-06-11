@@ -1,6 +1,6 @@
-import React, { useState, useEffect } from 'react'
+import React, { useState } from 'react'
+import { Lock, Unlock, AlertTriangle } from 'lucide-react'
 
-// ============ STATUS PILL ============
 export function StatusPill({ status }) {
   return (
     <span className={`pill pill-${status.color}`}>
@@ -9,27 +9,23 @@ export function StatusPill({ status }) {
   )
 }
 
-// ============ STAT TILE ============
-export function Tile({ label, value, tone, Icon }) {
+export function Tile({ label, value, sub, tone, Icon }) {
   return (
     <div className={`tile tile-${tone}`}>
       <div className="tile-icon"><Icon size={18} /></div>
       <div className="tile-val">{value}</div>
       <div className="tile-label">{label}</div>
+      {sub && <div className="tile-sub">{sub}</div>}
     </div>
   )
 }
 
-// ============ FORM FIELD ============
 export function Field({ label, value, onChange, type = 'text', readOnly, mono, placeholder }) {
   return (
     <label className="field">
       <span className="field-label">{label}</span>
       <input
-        type={type}
-        value={value ?? ''}
-        readOnly={readOnly}
-        placeholder={placeholder}
+        type={type} value={value ?? ''} readOnly={readOnly} placeholder={placeholder}
         onChange={e => onChange && onChange(e.target.value)}
         className={`field-input ${mono ? 'mono' : ''} ${readOnly ? 'readonly' : ''}`}
       />
@@ -37,76 +33,53 @@ export function Field({ label, value, onChange, type = 'text', readOnly, mono, p
   )
 }
 
-// ============ SELECT FIELD ============
-export function SelectField({ label, value, onChange, options }) {
+export function SelectField({ label, value, onChange, options, disabled }) {
   return (
     <label className="field">
       <span className="field-label">{label}</span>
-      <select className="field-input" value={value} onChange={e => onChange(e.target.value)}>
-        {options.map(o => <option key={o} value={o}>{o}</option>)}
+      <select className="field-input" value={value} disabled={disabled} onChange={e => onChange(e.target.value)}>
+        {options.map(o => typeof o === 'string'
+          ? <option key={o} value={o}>{o}</option>
+          : <option key={o.value} value={o.value}>{o.label}</option>
+        )}
       </select>
     </label>
   )
 }
 
-// ============ INFO CARD ============
 export function InfoCard({ title, children, action }) {
   return (
     <div className="info-card">
-      <div className="info-title">
-        <span>{title}</span>
-        {action}
-      </div>
+      <div className="info-title"><span>{title}</span>{action}</div>
       <div className="info-body">{children}</div>
     </div>
   )
 }
 
-// ============ KEY-VALUE ROW ============
 export function KV({ k, v }) {
-  return (
-    <div className="kv">
-      <span className="kv-k">{k}</span>
-      <span className="kv-v">{v || '—'}</span>
-    </div>
-  )
+  return <div className="kv"><span className="kv-k">{k}</span><span className="kv-v">{v ?? '—'}</span></div>
 }
-
-// ============ TOAST ============
-let toastTimer = null
 
 export function Toast({ message, visible }) {
   if (!visible) return null
-  return (
-    <div className="toast">
-      <span className="toast-icon">✓</span> {message}
-    </div>
-  )
+  return <div className="toast"><span className="toast-icon">✓</span> {message}</div>
 }
 
+let toastTimer = null
 export function useToast() {
   const [toast, setToast] = useState({ message: '', visible: false })
-
   const showToast = (message) => {
     if (toastTimer) clearTimeout(toastTimer)
     setToast({ message, visible: true })
     toastTimer = setTimeout(() => setToast({ message: '', visible: false }), 2200)
   }
-
   return { toast, showToast }
 }
 
-// ============ LOADING SPINNER ============
 export function Loading() {
-  return (
-    <div className="loading">
-      <div className="spinner" />
-      <span>Loading…</span>
-    </div>
-  )
+  return <div className="loading"><div className="spinner" /><span>Loading…</span></div>
 }
 
-// ============ ERROR BOX ============
 export function ErrorBox({ message, onRetry }) {
   return (
     <div className="error-box">
@@ -116,13 +89,39 @@ export function ErrorBox({ message, onRetry }) {
   )
 }
 
-// ============ EMPTY STATE ============
 export function EmptyState({ Icon, message, action }) {
   return (
     <div className="empty-state">
       {Icon && <Icon size={32} style={{ opacity: 0.3 }} />}
       <div>{message}</div>
       {action}
+    </div>
+  )
+}
+
+// Lock badge + admin unlock button
+export function LockBadge({ entry, isAdminUser, onUnlock }) {
+  if (!entry?.locked) return null
+  return (
+    <span className="lock-badge">
+      <Lock size={12} /> Locked
+      {isAdminUser && onUnlock && (
+        <button className="unlock-btn" onClick={onUnlock}><Unlock size={11} /> Unlock</button>
+      )}
+    </span>
+  )
+}
+
+// RED roll warning banner
+export function RollWarningBanner({ warnings }) {
+  if (!warnings || warnings.length === 0) return null
+  return (
+    <div className="roll-warning">
+      <AlertTriangle size={18} />
+      <div>
+        <div className="roll-warning-title">ROLL COUNT MISMATCH — CHECK FOR MISSING ROLLS</div>
+        {warnings.map((w, i) => <div key={i} className="roll-warning-line">{w.message}</div>)}
+      </div>
     </div>
   )
 }

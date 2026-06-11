@@ -5,6 +5,8 @@ import { useToast } from './components/ui'
 import LoginPage from './components/LoginPage'
 import Layout from './components/Layout'
 import Dashboard from './components/Dashboard'
+import YarnStockPage from './components/YarnStockPage'
+import KnittingPage from './components/KnittingPage'
 import OrdersList from './components/OrdersList'
 import NewOrderForm from './components/NewOrderForm'
 import ProcessEntryPage from './components/ProcessEntryPage'
@@ -19,31 +21,16 @@ export default function App() {
   const { toast, showToast } = useToast()
 
   useEffect(() => {
-    // Check existing session
     supabase.auth.getSession().then(({ data: { session } }) => {
       setSession(session)
       setLoading(false)
     })
-
-    // Listen for auth changes
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
-      setSession(session)
-    })
-
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_e, s) => setSession(s))
     return () => subscription.unsubscribe()
   }, [])
 
-  if (loading) {
-    return (
-      <div className="login-page">
-        <div style={{ color: 'var(--ink-60)' }}>Connecting…</div>
-      </div>
-    )
-  }
-
-  if (!session) {
-    return <LoginPage onLogin={(s) => setSession(s)} />
-  }
+  if (loading) return <div className="login-page"><div style={{ color: 'var(--ink-60)' }}>Connecting…</div></div>
+  if (!session) return <LoginPage onLogin={setSession} />
 
   const userEmail = session.user.email
 
@@ -52,10 +39,12 @@ export default function App() {
       <Routes>
         <Route element={<Layout toast={toast} />}>
           <Route path="/" element={<Dashboard />} />
+          <Route path="/yarn" element={<YarnStockPage showToast={showToast} userEmail={userEmail} />} />
+          <Route path="/knitting" element={<KnittingPage showToast={showToast} userEmail={userEmail} />} />
           <Route path="/orders" element={<OrdersList />} />
           <Route path="/new-order" element={<NewOrderForm showToast={showToast} />} />
-          <Route path="/process-entry" element={<ProcessEntryPage showToast={showToast} />} />
-          <Route path="/orders/:id" element={<OrderDetail showToast={showToast} />} />
+          <Route path="/process-entry" element={<ProcessEntryPage showToast={showToast} userEmail={userEmail} />} />
+          <Route path="/orders/:id" element={<OrderDetail showToast={showToast} userEmail={userEmail} />} />
           <Route path="/orders/:id/report" element={<OrderClosingReport />} />
           <Route path="/reports" element={<ReportsPage />} />
           <Route path="/settings" element={<SettingsPage userEmail={userEmail} onLogout={() => setSession(null)} />} />

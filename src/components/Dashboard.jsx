@@ -2,64 +2,65 @@ import React, { useState, useEffect, useMemo } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
   Package, CheckCircle2, Clock, AlertTriangle,
-  TrendingDown, Factory, ClipboardList, ChevronRight
+  TrendingDown, Factory, Layers, Scissors, ChevronRight
 } from 'lucide-react'
-import { fetchAllOrderData } from '../lib/api'
+import { fetchAllOrderData, fetchYarnStock, fetchBatches } from '../lib/api'
 import { getOrderStatus, getCurrentStage, daysBetween, today, num } from '../lib/utils'
 import { StatusPill, Tile, Loading, ErrorBox, EmptyState } from './ui'
 
 export default function Dashboard() {
   const navigate = useNavigate()
   const [data, setData] = useState(null)
+  const [yarn, setYarn] = useState([])
+  const [batches, setBatches] = useState([])
   const [error, setError] = useState(null)
 
   const load = () => {
     setError(null)
-    fetchAllOrderData().then(setData).catch(e => setError(e.message))
+    Promise.all([fetchAllOrderData(), fetchYarnStock(), fetchBatches()])
+      .then(([d, y, b]) => { setData(d); setYarn(y || []); setBatches(b || []) })
+      .catch(e => setError(e.message))
   }
   useEffect(load, [])
 
   const stats = useMemo(() => {
     if (!data) return null
-    const { orders, yarns, processes, inhouses } = data
-    let open = 0, completed = 0, pending = 0, delayed = 0, excess = 0, todayKgs = 0, totalRolls = 0
-
+    const { orders, allocations, processes, inhouses } = data
+    let open = 0, completed = 0, pending = 0, delayed = 0, excess = 0, todayKgs = 0
     orders.forEach(o => {
-      const y = yarns.find(x => x.order_id === o.id)
-      const procs = processes.filter(x => x.order_id === o.id)
-      const ih = inhouses.find(x => x.order_id === o.id)
-      const s = getOrderStatus(o, y, procs, ih)
-
+      const alloc = allocations.filter(a => a.order_id === o.id)
+      const procs = processes.filter(p => p.order_id === o.id)
+      const ih = inhouses.find(i => i.order_id === o.id)
+      const s = getOrderStatus(o, alloc, procs, ih)
       if (ih) {
         completed++
         if (ih.inhouse_date === today()) todayKgs += num(ih.final_kgs)
-        totalRolls += num(ih.rolls)
       } else {
         open++
         if (s.code === 'yellow') pending++
-        if (s.code === 'red') {
-          delayed++
-          if (procs.some(p => num(p.loss_percent) > 7)) excess++
-        }
+        if (s.code === 'red') { delayed++; if (procs.some(p => num(p.loss_percent) > 7)) excess++ }
       }
     })
-    return { open, completed, pending, delayed, excess, todayKgs, totalRolls }
-  }, [data])
+    const yarnBal = yarn.reduce((s, r) => s + num(r.balance_kgs), 0)
+    const greyBal = batches.reduce((s, b) => s + Math.max(0, num(b.balance_kgs)), 0)
+    return { open, completed, pending, delayed, excess, todayKgs, yarnBal, greyBal }
+  }, [data, yarn, batches])
 
   if (error) return <div className="page"><ErrorBox message={error} onRetry={load} /></div>
-  if (!data) return <div className="page"><Loading /></div>
+  if (!data || !stats) return <div className="page"><Loading /></div>
 
-  const { orders, yarns, processes, inhouses } = data
+  const { orders, allocations, processes, inhouses } = data
   const recent = orders.slice(0, 8)
 
   const tiles = [
-    { label: 'Open Orders', value: stats.open, tone: 'blue', Icon: Package },
+    { label: 'Yarn Stock', value: stats.yarnBal.toFixed(0), sub: 'kgs', tone: 'blue', Icon: Layers },
+    { label: 'Grey Fabric Stock', value: stats.greyBal.toFixed(0), sub: 'kgs', tone: 'blue', Icon: Scissors },
+    { label: 'Open Orders', value: stats.open, tone: 'neutral', Icon: Package },
     { label: 'Completed', value: stats.completed, tone: 'green', Icon: CheckCircle2 },
     { label: 'Pending', value: stats.pending, tone: 'yellow', Icon: Clock },
     { label: 'Delayed', value: stats.delayed, tone: 'red', Icon: AlertTriangle },
     { label: 'Excess Loss', value: stats.excess, tone: 'red', Icon: TrendingDown },
-    { label: 'Today Inhouse Kgs', value: stats.todayKgs.toFixed(1), tone: 'neutral', Icon: Factory },
-    { label: 'Total Rolls Inhouse', value: stats.totalRolls, tone: 'neutral', Icon: ClipboardList },
+    { label: 'Today Inhouse', value: stats.todayKgs.toFixed(0), sub: 'kgs', tone: 'green', Icon: Factory },
   ]
 
   return (
@@ -67,7 +68,6 @@ export default function Dashboard() {
       <div className="tile-grid">
         {tiles.map(t => <Tile key={t.label} {...t} />)}
       </div>
-
       <section className="panel">
         <div className="panel-head">
           <h2>Recent Orders</h2>
@@ -80,18 +80,15 @@ export default function Dashboard() {
         ) : (
           <div className="table-wrap">
             <table className="table">
-              <thead><tr>
-                <th>Job No</th><th>Buyer</th><th>Colour</th><th>Stage</th><th>Days</th><th>Status</th><th></th>
-              </tr></thead>
+              <thead><tr><th>Job No</th><th>Buyer</th><th>Colour</th><th>Stage</th><th>Days</th><th>Status</th><th></th></tr></thead>
               <tbody>
                 {recent.map(o => {
-                  const y = yarns.find(x => x.order_id === o.id)
-                  const procs = processes.filter(x => x.order_id === o.id)
-                  const ih = inhouses.find(x => x.order_id === o.id)
-                  const s = getOrderStatus(o, y, procs, ih)
-                  const stage = getCurrentStage(y, procs, ih)
-                  const startDate = y ? y.received_date : o.order_date
-                  const days = daysBetween(startDate, ih ? ih.inhouse_date : today())
+                  const alloc = allocations.filter(a => a.order_id === o.id)
+                  const procs = processes.filter(p => p.order_id === o.id)
+                  const ih = inhouses.find(i => i.order_id === o.id)
+                  const s = getOrderStatus(o, alloc, procs, ih)
+                  const stage = getCurrentStage(alloc, procs, ih, o)
+                  const days = daysBetween(o.order_date, ih ? ih.inhouse_date : today())
                   return (
                     <tr key={o.id} onClick={() => navigate(`/orders/${o.id}`)} className="row-click">
                       <td className="mono">{o.job_number}</td>

@@ -2,8 +2,7 @@ import React, { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Search, PlusCircle, Filter } from 'lucide-react'
 import { fetchAllOrderData } from '../lib/api'
-import { getOrderStatus, getCurrentStage, daysBetween, today, num } from '../lib/utils'
-import { LOSS_LIMIT_PERCENT } from '../lib/constants'
+import { getOrderStatus, getCurrentStage, daysBetween, today, fmtDate } from '../lib/utils'
 import { StatusPill, Loading, ErrorBox, EmptyState } from './ui'
 
 export default function OrdersList() {
@@ -13,25 +12,21 @@ export default function OrdersList() {
   const [q, setQ] = useState('')
   const [filter, setFilter] = useState('all')
 
-  const load = () => {
-    setError(null)
-    fetchAllOrderData().then(setData).catch(e => setError(e.message))
-  }
+  const load = () => { setError(null); fetchAllOrderData().then(setData).catch(e => setError(e.message)) }
   useEffect(load, [])
 
   if (error) return <div className="page"><ErrorBox message={error} onRetry={load} /></div>
   if (!data) return <div className="page"><Loading /></div>
 
-  const { orders, yarns, processes, inhouses } = data
+  const { orders, allocations, processes, inhouses } = data
 
   const enriched = orders.map(o => {
-    const y = yarns.find(x => x.order_id === o.id)
-    const procs = processes.filter(x => x.order_id === o.id)
-    const ih = inhouses.find(x => x.order_id === o.id)
-    const s = getOrderStatus(o, y, procs, ih)
-    const stage = getCurrentStage(y, procs, ih)
-    const startDate = y ? y.received_date : o.order_date
-    const days = daysBetween(startDate, ih ? ih.inhouse_date : today())
+    const alloc = allocations.filter(a => a.order_id === o.id)
+    const procs = processes.filter(p => p.order_id === o.id)
+    const ih = inhouses.find(i => i.order_id === o.id)
+    const s = getOrderStatus(o, alloc, procs, ih)
+    const stage = getCurrentStage(alloc, procs, ih, o)
+    const days = daysBetween(o.order_date, ih ? ih.inhouse_date : today())
     return { ...o, _status: s, _stage: stage, _days: days, _completed: !!ih }
   })
 
@@ -67,11 +62,10 @@ export default function OrdersList() {
           ))}
         </div>
       </div>
-
       {filtered.length === 0 ? (
         <EmptyState Icon={Filter} message="No orders match your filters." />
       ) : (
-        <div className="table-wrap">
+        <div className="table-wrap panel">
           <table className="table">
             <thead><tr>
               <th>Job No</th><th>Buyer</th><th>PO</th><th>Fabric</th><th>Colour</th>
@@ -86,7 +80,7 @@ export default function OrdersList() {
                   <td>{o.fabric_name}</td>
                   <td>{o.colour}</td>
                   <td className="mono">{o.required_kgs}</td>
-                  <td className="mono">{o._completed ? '—' : (o.target_date ? new Date(o.target_date+'T00:00:00').toLocaleDateString('en-GB',{day:'2-digit',month:'short'}) : '—')}</td>
+                  <td className="mono">{fmtDate(o.target_date)}</td>
                   <td>{o._stage}</td>
                   <td className="mono">{o._days}d</td>
                   <td><StatusPill status={o._status} /></td>

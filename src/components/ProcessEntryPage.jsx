@@ -1,30 +1,28 @@
 import React, { useState, useEffect, useMemo } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { fetchAllOrderData, fetchOrderFull } from '../lib/api'
-import { STAGES, PROCESS_STAGES } from '../lib/constants'
+import { getActiveStages, num } from '../lib/utils'
 import { Loading, ErrorBox } from './ui'
-import { YarnEntryForm, ProcessEntryForm, InhouseEntryForm } from './EntryForms'
+import { ProcessEntryForm, InhouseConfirmForm } from './EntryForms'
 
-export default function ProcessEntryPage({ showToast }) {
+export default function ProcessEntryPage({ showToast, userEmail }) {
   const navigate = useNavigate()
   const [allData, setAllData] = useState(null)
   const [error, setError] = useState(null)
   const [orderId, setOrderId] = useState('')
-  const [stage, setStage] = useState('Yarn Received')
+  const [stage, setStage] = useState('')
   const [orderData, setOrderData] = useState(null)
   const [loadingDetail, setLoadingDetail] = useState(false)
 
   useEffect(() => {
-    fetchAllOrderData()
-      .then(d => setAllData(d))
-      .catch(e => setError(e.message))
+    fetchAllOrderData().then(setAllData).catch(e => setError(e.message))
   }, [])
 
   useEffect(() => {
-    if (!orderId) { setOrderData(null); return }
+    if (!orderId) { setOrderData(null); setStage(''); return }
     setLoadingDetail(true)
     fetchOrderFull(orderId)
-      .then(setOrderData)
+      .then(d => { setOrderData(d); setStage('') })
       .catch(e => setError(e.message))
       .finally(() => setLoadingDetail(false))
   }, [orderId])
@@ -34,18 +32,36 @@ export default function ProcessEntryPage({ showToast }) {
     return allData.orders.filter(o => !allData.inhouses.find(i => i.order_id === o.id))
   }, [allData])
 
-  const yarn = orderData?.yarn || null
-  const existingProc = orderData ? (orderData.processes || []).find(p => p.process_name === stage) || null : null
-  const existingInhouse = orderData?.inhouse || null
+  const stages = useMemo(() => orderData ? [...getActiveStages(orderData.order), 'Inhouse'] : [], [orderData])
+
+  const greyKgs = useMemo(() =>
+    orderData ? (orderData.allocations || []).reduce((s, a) => s + num(a.allocated_kgs), 0) : 0
+  , [orderData])
+
+  const existingProc = orderData && stage ? (orderData.processes || []).find(p => p.process_name === stage) || null : null
 
   const suggestedInward = useMemo(() => {
-    if (!orderData || stage === 'Yarn Received') return null
-    if (stage === 'Knitting') return yarn?.yarn_kgs
-    const idx = PROCESS_STAGES.indexOf(stage)
+    if (!orderData || !stage || stage === 'Inhouse') return null
+    const activeStages = getActiveStages(orderData.order)
+    const idx = activeStages.indexOf(stage)
+    if (idx === 0) return greyKgs || null
     if (idx <= 0) return null
-    const prev = (orderData.processes || []).find(p => p.process_name === PROCESS_STAGES[idx - 1])
+    const prev = (orderData.processes || []).find(p => p.process_name === activeStages[idx - 1])
     return prev?.outward_kgs
-  }, [stage, orderData, yarn])
+  }, [stage, orderData, greyKgs])
+
+  const prevRollsInfo = useMemo(() => {
+    if (!orderData || !stage || stage === 'Inhouse') return null
+    const activeStages = getActiveStages(orderData.order)
+    const idx = activeStages.indexOf(stage)
+    if (idx === 0) {
+      const allocRolls = (orderData.allocations || []).reduce((s, a) => s + num(a.rolls || 0), 0)
+      return allocRolls > 0 ? { rolls: allocRolls, name: 'Knitting (allocated)' } : null
+    }
+    if (idx <= 0) return null
+    const prev = (orderData.processes || []).find(p => p.process_name === activeStages[idx - 1])
+    return prev?.rolls ? { rolls: prev.rolls, name: activeStages[idx - 1] } : null
+  }, [stage, orderData])
 
   const handleDone = (msg) => {
     showToast(msg)
@@ -58,10 +74,7 @@ export default function ProcessEntryPage({ showToast }) {
   return (
     <div className="page">
       <div className="pe-card">
-        <div className="pe-step">
-          <div className="pe-step-num">1</div>
-          <div className="pe-step-label">Select Job Number</div>
-        </div>
+        <div className="pe-step"><div className="pe-step-num">1</div><div className="pe-step-label">Select Job Number</div></div>
         <select className="big-select" value={orderId} onChange={e => setOrderId(e.target.value)}>
           <option value="">— Choose an order —</option>
           {openOrders.map(o =>
@@ -69,34 +82,39 @@ export default function ProcessEntryPage({ showToast }) {
           )}
         </select>
 
-        {orderId && !loadingDetail && (
+        {orderId && !loadingDetail && orderData && (
           <>
-            <div className="pe-step">
-              <div className="pe-step-num">2</div>
-              <div className="pe-step-label">Choose Stage</div>
-            </div>
+            {greyKgs === 0 && (
+              <div className="locked-banner" style={{ marginTop: 14 }}>
+                ⚠ No grey fabric allocated yet. Go to the order page to allocate fabric from a knitting batch first.
+                <button className="btn-ghost" style={{ marginTop: 8 }} onClick={() => navigate(`/orders/${orderId}`)}>Open order</button>
+              </div>
+            )}
+
+            <div className="pe-step"><div className="pe-step-num">2</div><div className="pe-step-label">Choose Stage</div></div>
             <div className="stage-grid">
-              {STAGES.map(s => (
+              {stages.map(s => (
                 <button key={s} className={`stage-btn ${stage === s ? 'active' : ''}`} onClick={() => setStage(s)}>
                   {s}
                 </button>
               ))}
             </div>
 
-            <div className="pe-step">
-              <div className="pe-step-num">3</div>
-              <div className="pe-step-label">Enter Details</div>
-            </div>
-
-            {stage === 'Yarn Received' && (
-              <YarnEntryForm orderId={orderId} existing={yarn} onDone={handleDone} />
-            )}
-            {PROCESS_STAGES.includes(stage) && (
-              <ProcessEntryForm orderId={orderId} stage={stage} existing={existingProc}
-                suggestedInward={suggestedInward} onDone={handleDone} />
-            )}
-            {stage === 'Fabric Inhouse' && (
-              <InhouseEntryForm orderId={orderId} yarn={yarn} existing={existingInhouse} onDone={handleDone} />
+            {stage && (
+              <>
+                <div className="pe-step"><div className="pe-step-num">3</div><div className="pe-step-label">Enter Details</div></div>
+                {stage !== 'Inhouse' && (
+                  <ProcessEntryForm orderId={orderId} stage={stage} existing={existingProc}
+                    suggestedInward={suggestedInward}
+                    prevRolls={prevRollsInfo?.rolls} prevStageName={prevRollsInfo?.name}
+                    userEmail={userEmail} onDone={handleDone} />
+                )}
+                {stage === 'Inhouse' && (
+                  <InhouseConfirmForm orderId={orderId} order={orderData.order}
+                    allocations={orderData.allocations} processes={orderData.processes}
+                    existing={orderData.inhouse} userEmail={userEmail} onDone={handleDone} />
+                )}
+              </>
             )}
 
             <button className="btn-view-order" onClick={() => navigate(`/orders/${orderId}`)}>
@@ -104,8 +122,7 @@ export default function ProcessEntryPage({ showToast }) {
             </button>
           </>
         )}
-
-        {loadingDetail && <div style={{ padding: '24px', textAlign: 'center', color: 'var(--ink-40)' }}>Loading order...</div>}
+        {loadingDetail && <div style={{ padding: 24, textAlign: 'center', color: 'var(--ink-40)' }}>Loading order…</div>}
       </div>
     </div>
   )

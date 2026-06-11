@@ -1,48 +1,72 @@
-import React, { useState, useEffect, useMemo } from 'react'
+import React, { useState, useEffect } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { ArrowLeft, PlusCircle, Printer, X } from 'lucide-react'
-import { fetchOrderFull } from '../lib/api'
-import { getOrderStatus, getNextStage, fmtDate, num } from '../lib/utils'
-import { PROCESS_STAGES, LOSS_LIMIT_PERCENT } from '../lib/constants'
-import { StatusPill, InfoCard, KV, Loading, ErrorBox } from './ui'
-import { YarnEntryForm, ProcessEntryForm, InhouseEntryForm } from './EntryForms'
+import { fetchOrderFull, unlockProcess, unlockInhouse, updateOrder } from '../lib/api'
+import { getOrderStatus, getNextStage, getActiveStages, getRollWarnings, fmtDate, num, isAdmin } from '../lib/utils'
+import { LOSS_LIMIT_PERCENT } from '../lib/constants'
+import { StatusPill, InfoCard, KV, Loading, ErrorBox, RollWarningBanner, LockBadge } from './ui'
+import { AllocationForm, ProcessEntryForm, InhouseConfirmForm } from './EntryForms'
 
-export default function OrderDetail({ showToast }) {
+export default function OrderDetail({ showToast, userEmail }) {
   const { id } = useParams()
   const navigate = useNavigate()
   const [data, setData] = useState(null)
   const [error, setError] = useState(null)
   const [activeStage, setActiveStage] = useState(null)
 
-  const load = () => {
-    setError(null)
-    fetchOrderFull(id).then(setData).catch(e => setError(e.message))
-  }
+  const load = () => { setError(null); fetchOrderFull(id).then(setData).catch(e => setError(e.message)) }
   useEffect(load, [id])
 
   if (error) return <div className="page"><ErrorBox message={error} onRetry={load} /></div>
   if (!data) return <div className="page"><Loading /></div>
 
-  const { order, yarn, processes, inhouse } = data
-  const status = getOrderStatus(order, yarn, processes, inhouse)
-  const nextStage = getNextStage(yarn, processes, inhouse)
+  const { order, allocations, processes, inhouse } = data
+  const status = getOrderStatus(order, allocations, processes, inhouse)
+  const nextStage = getNextStage(allocations, processes, inhouse, order)
+  const stages = getActiveStages(order)
+  const rollWarnings = getRollWarnings(allocations, processes, inhouse, order)
+  const admin = isAdmin(userEmail)
 
-  const closeForm = () => setActiveStage(null)
-  const handleDone = (msg) => {
-    showToast(msg)
-    setActiveStage(null)
-    load() // refresh data
+  const greyKgs = allocations.reduce((s, a) => s + num(a.allocated_kgs), 0)
+
+  const handleDone = (msg) => { showToast(msg); setActiveStage(null); load() }
+  const handleAllocDone = (msg) => { showToast(msg); load() }
+
+  const doUnlock = async (kind, entryId) => {
+    try {
+      if (kind === 'process') await unlockProcess(entryId)
+      if (kind === 'inhouse') await unlockInhouse(entryId)
+      showToast('Unlocked for editing')
+      load()
+    } catch (e) { alert('Error: ' + e.message) }
   }
 
-  const existingProc = activeStage && PROCESS_STAGES.includes(activeStage)
-    ? processes.find(p => p.process_name === activeStage) : null
+  const toggleCombo = async () => {
+    if (processes.length > 0) { alert('Cannot change after process entries exist.'); return }
+    try {
+      await updateOrder(order.id, { dyeing_stenter_combined: !order.dyeing_stenter_combined })
+      showToast('Updated')
+      load()
+    } catch (e) { alert('Error: ' + e.message) }
+  }
+
+  const existingProc = activeStage ? processes.find(p => p.process_name === activeStage) : null
 
   const suggestedInwardFor = (stage) => {
-    if (stage === 'Knitting') return yarn?.yarn_kgs
-    const idx = PROCESS_STAGES.indexOf(stage)
-    if (idx <= 0) return null
-    const prev = processes.find(p => p.process_name === PROCESS_STAGES[idx - 1])
+    const idx = stages.indexOf(stage)
+    if (idx === 0) return greyKgs || null
+    const prev = processes.find(p => p.process_name === stages[idx - 1])
     return prev?.outward_kgs
+  }
+
+  const prevRollsFor = (stage) => {
+    const idx = stages.indexOf(stage)
+    if (idx === 0) {
+      const allocRolls = (allocations || []).reduce((s, a) => s + num(a.rolls || 0), 0)
+      return allocRolls > 0 ? { rolls: allocRolls, name: 'Knitting (allocated)' } : null
+    }
+    const prev = processes.find(p => p.process_name === stages[idx - 1])
+    return prev?.rolls ? { rolls: prev.rolls, name: stages[idx - 1] } : null
   }
 
   return (
@@ -56,7 +80,7 @@ export default function OrderDetail({ showToast }) {
         </div>
         <div className="detail-head-right">
           <StatusPill status={status} />
-          {nextStage && (
+          {nextStage && nextStage !== 'Grey Fabric' && (
             <button className="btn-primary" onClick={() => setActiveStage(nextStage)}>
               <PlusCircle size={16} /> Add {nextStage}
             </button>
@@ -69,26 +93,27 @@ export default function OrderDetail({ showToast }) {
         </div>
       </div>
 
-      {/* Inline entry form */}
-      {activeStage && (
+      <RollWarningBanner warnings={rollWarnings} />
+
+      {activeStage && activeStage !== 'Grey Fabric' && (
         <div className="inline-form-card">
           <div className="inline-form-head">
             <div>
               <div className="inline-form-title">{activeStage}</div>
               <div className="inline-form-sub">{order.job_number} · {order.buyer_name}</div>
             </div>
-            <button className="btn-icon" onClick={closeForm}><X size={18} /></button>
+            <button className="btn-icon" onClick={() => setActiveStage(null)}><X size={18} /></button>
           </div>
           <div style={{ padding: 20 }}>
-            {activeStage === 'Yarn Received' && (
-              <YarnEntryForm orderId={order.id} existing={yarn} onDone={handleDone} />
-            )}
-            {PROCESS_STAGES.includes(activeStage) && (
+            {stages.includes(activeStage) && (
               <ProcessEntryForm orderId={order.id} stage={activeStage} existing={existingProc}
-                suggestedInward={suggestedInwardFor(activeStage)} onDone={handleDone} />
+                suggestedInward={suggestedInwardFor(activeStage)}
+                prevRolls={prevRollsFor(activeStage)?.rolls} prevStageName={prevRollsFor(activeStage)?.name}
+                userEmail={userEmail} onDone={handleDone} />
             )}
-            {activeStage === 'Fabric Inhouse' && (
-              <InhouseEntryForm orderId={order.id} yarn={yarn} existing={inhouse} onDone={handleDone} />
+            {activeStage === 'Inhouse' && (
+              <InhouseConfirmForm orderId={order.id} order={order} allocations={allocations}
+                processes={processes} existing={inhouse} userEmail={userEmail} onDone={handleDone} />
             )}
           </div>
         </div>
@@ -100,38 +125,37 @@ export default function OrderDetail({ showToast }) {
           <KV k="GSM" v={order.gsm} />
           <KV k="Composition" v={order.composition} />
           <KV k="Width" v={order.width} />
-          <KV k="Required" v={`${order.required_kgs || '—'} kgs / ${order.required_meters || '—'} m`} />
+          <KV k="Required" v={`${order.required_kgs || '—'} kgs`} />
           <KV k="Order Date" v={fmtDate(order.order_date)} />
           <KV k="Target Inhouse" v={fmtDate(order.target_date)} />
+          <div className="kv">
+            <span className="kv-k">Dye+Stenter combined</span>
+            <span className="kv-v">
+              {order.dyeing_stenter_combined ? 'Yes' : 'No'}
+              {admin && processes.length === 0 && (
+                <button className="row-action" style={{ marginLeft: 8 }} onClick={toggleCombo}>Change</button>
+              )}
+            </span>
+          </div>
         </InfoCard>
 
-        <InfoCard title="Yarn" action={
-          <button className="info-action" onClick={() => setActiveStage('Yarn Received')}>
-            {yarn ? 'Edit' : 'Add'}
-          </button>
-        }>
-          {yarn ? <>
-            <KV k="Supplier" v={yarn.supplier_name} />
-            <KV k="Invoice" v={yarn.invoice_no} />
-            <KV k="Type / Lot" v={`${yarn.yarn_type || '—'} / ${yarn.lot_no || '—'}`} />
-            <KV k="Received" v={`${yarn.yarn_kgs} kgs`} />
-            <KV k="Date" v={fmtDate(yarn.received_date)} />
-          </> : <div className="muted">No yarn entry yet.</div>}
+        <InfoCard title={`Grey Fabric · ${greyKgs.toFixed(1)} kgs`}>
+          <AllocationForm orderId={order.id} allocations={allocations} userEmail={userEmail} onDone={handleAllocDone} />
         </InfoCard>
 
         <InfoCard title="Inhouse" action={
-          <button className="info-action" onClick={() => setActiveStage('Fabric Inhouse')}>
-            {inhouse ? 'Edit' : 'Add'}
+          <button className="info-action" onClick={() => setActiveStage('Inhouse')}>
+            {inhouse ? 'View / Edit' : 'Confirm'}
           </button>
         }>
           {inhouse ? <>
+            <div style={{ marginBottom: 6 }}><LockBadge entry={inhouse} isAdminUser={admin} onUnlock={() => doUnlock('inhouse', inhouse.id)} /></div>
             <KV k="Date" v={fmtDate(inhouse.inhouse_date)} />
             <KV k="Final Kgs" v={inhouse.final_kgs} />
             <KV k="Rolls" v={inhouse.rolls} />
             <KV k="QC / Shade" v={`${inhouse.qc_status} / ${inhouse.shade_status}`} />
             <KV k="Rack" v={inhouse.rack_location} />
-            <KV k="Total Days" v={`${inhouse.total_days}d`} />
-          </> : <div className="muted">Not yet inhoused.</div>}
+          </> : <div className="muted">Not yet inhoused. Complete all processes, then confirm.</div>}
         </InfoCard>
       </div>
 
@@ -144,18 +168,26 @@ export default function OrderDetail({ showToast }) {
               <th>Outward</th><th>Out Kgs</th><th>Rolls</th><th>Loss</th><th>Days</th><th></th>
             </tr></thead>
             <tbody>
-              {PROCESS_STAGES.map(s => {
+              <tr>
+                <td className="strong">Grey Fabric</td>
+                <td colSpan={2}>{allocations.length} batch allocation{allocations.length !== 1 ? 's' : ''}</td>
+                <td className="mono strong">{greyKgs.toFixed(1)}</td>
+                <td colSpan={2}></td>
+                <td className="mono">{allocations.reduce((s, a) => s + num(a.rolls), 0) || '—'}</td>
+                <td colSpan={3}></td>
+              </tr>
+              {stages.map(s => {
                 const p = processes.find(x => x.process_name === s)
                 if (!p) return (
                   <tr key={s}>
                     <td className="strong">{s}</td>
-                    <td colSpan={7} className="muted">— not started —</td>
+                    <td colSpan={8} className="muted">— not started —</td>
                     <td><button className="row-action" onClick={() => setActiveStage(s)}>+ Add</button></td>
                   </tr>
                 )
                 return (
                   <tr key={s}>
-                    <td className="strong">{s}</td>
+                    <td className="strong">{s} {p.locked && '🔒'}</td>
                     <td>{p.vendor_name || '—'}</td>
                     <td>{fmtDate(p.inward_date)}</td>
                     <td className="mono">{p.inward_kgs}</td>
@@ -166,10 +198,30 @@ export default function OrderDetail({ showToast }) {
                       {num(p.loss_kgs).toFixed(1)} / {num(p.loss_percent).toFixed(1)}%
                     </td>
                     <td className="mono">{p.days_taken || 0}d</td>
-                    <td><button className="row-action" onClick={() => setActiveStage(s)}>Edit</button></td>
+                    <td style={{ whiteSpace: 'nowrap' }}>
+                      <button className="row-action" onClick={() => setActiveStage(s)}>{p.locked && !admin ? 'View' : 'Edit'}</button>
+                      {p.locked && admin && (
+                        <button className="row-action" style={{ marginLeft: 6 }} onClick={() => doUnlock('process', p.id)}>Unlock</button>
+                      )}
+                    </td>
                   </tr>
                 )
               })}
+              <tr>
+                <td className="strong">Inhouse {inhouse?.locked && '🔒'}</td>
+                {inhouse ? <>
+                  <td>Amoga FG Store</td>
+                  <td>{fmtDate(inhouse.inhouse_date)}</td>
+                  <td className="mono strong">{inhouse.final_kgs}</td>
+                  <td colSpan={2}></td>
+                  <td className="mono">{inhouse.rolls || '—'}</td>
+                  <td colSpan={2}></td>
+                  <td><button className="row-action" onClick={() => setActiveStage('Inhouse')}>View</button></td>
+                </> : <>
+                  <td colSpan={8} className="muted">— pending —</td>
+                  <td><button className="row-action" onClick={() => setActiveStage('Inhouse')}>Confirm</button></td>
+                </>}
+              </tr>
             </tbody>
           </table>
         </div>

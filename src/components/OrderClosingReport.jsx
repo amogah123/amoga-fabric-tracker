@@ -2,8 +2,7 @@ import React, { useState, useEffect } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { ArrowLeft, Printer } from 'lucide-react'
 import { fetchOrderFull } from '../lib/api'
-import { fmtDate, today, daysBetween, num } from '../lib/utils'
-import { PROCESS_STAGES } from '../lib/constants'
+import { fmtDate, today, daysBetween, num, getActiveStages, getRollWarnings } from '../lib/utils'
 import { Loading, ErrorBox } from './ui'
 
 export default function OrderClosingReport() {
@@ -19,11 +18,12 @@ export default function OrderClosingReport() {
   if (error) return <div className="page"><ErrorBox message={error} /></div>
   if (!data) return <div className="page"><Loading /></div>
 
-  const { order, yarn, processes, inhouse } = data
-  const getP = (n) => processes.find(p => p.process_name === n)
-  const totalLossKgs = processes.reduce((s, p) => s + num(p.loss_kgs), 0)
-  const totalLossPct = yarn && num(yarn.yarn_kgs) > 0 ? (totalLossKgs / num(yarn.yarn_kgs)) * 100 : 0
-  const totalDays = yarn && inhouse ? daysBetween(yarn.received_date, inhouse.inhouse_date) : 0
+  const { order, allocations, processes, inhouse } = data
+  const stages = getActiveStages(order)
+  const greyKgs = allocations.reduce((s, a) => s + num(a.allocated_kgs), 0)
+  const totalLossP = greyKgs > 0 && inhouse ? ((greyKgs - num(inhouse.final_kgs)) / greyKgs) * 100 : 0
+  const totalDays = inhouse ? daysBetween(order.order_date, inhouse.inhouse_date) : 0
+  const rollWarnings = getRollWarnings(allocations, processes, inhouse, order)
 
   return (
     <div className="page print-page">
@@ -50,18 +50,21 @@ export default function OrderClosingReport() {
         </section>
 
         <section className="report-section">
-          <h3>Production Summary</h3>
+          <h3>Grey Fabric Source (Knitting Batches)</h3>
           <table className="report-table">
+            <thead><tr><th>Batch</th><th>Structure</th><th>Kgs Allocated</th><th>Rolls</th></tr></thead>
             <tbody>
-              <tr><td>Yarn Received</td><td className="mono">{yarn?.yarn_kgs || '—'} kgs</td>
-                  <td>Knitted Qty</td><td className="mono">{getP('Knitting')?.outward_kgs || '—'} kgs</td></tr>
-              <tr><td>Dyed Qty</td><td className="mono">{getP('Dyeing')?.outward_kgs || '—'} kgs</td>
-                  <td>Finished Qty</td><td className="mono">{getP('Finishing')?.outward_kgs || getP('Stentering')?.outward_kgs || '—'} kgs</td></tr>
-              <tr><td>Inhouse Qty</td><td className="mono strong">{inhouse?.final_kgs || '—'} kgs</td>
-                  <td>Total Rolls</td><td className="mono">{inhouse?.rolls || '—'}</td></tr>
-              <tr><td>Avg Roll Weight</td><td className="mono">{inhouse?.avg_roll_weight || '—'} kgs</td>
-                  <td>Total Loss %</td><td className="mono strong">{totalLossPct.toFixed(2)}%</td></tr>
-              <tr><td>Total Days</td><td className="mono" colSpan={3}>{totalDays} days</td></tr>
+              {allocations.map(a => (
+                <tr key={a.id}>
+                  <td className="mono">{a.knitting_batches?.batch_no}</td>
+                  <td>{a.knitting_batches?.fabric_structure} {a.knitting_batches?.dia || ''}</td>
+                  <td className="mono">{num(a.allocated_kgs).toFixed(1)}</td>
+                  <td className="mono">{a.rolls || '—'}</td>
+                </tr>
+              ))}
+              <tr><td colSpan={2} className="strong">TOTAL GREY FABRIC</td>
+                <td className="mono strong">{greyKgs.toFixed(1)}</td>
+                <td className="mono">{allocations.reduce((s, a) => s + num(a.rolls), 0) || '—'}</td></tr>
             </tbody>
           </table>
         </section>
@@ -69,22 +72,48 @@ export default function OrderClosingReport() {
         <section className="report-section">
           <h3>Process Timeline</h3>
           <table className="report-table">
-            <thead><tr><th>Stage</th><th>Date</th><th>Vendor</th><th>Kgs</th><th>Loss %</th></tr></thead>
+            <thead><tr><th>Stage</th><th>Vendor</th><th>In Date</th><th>In Kgs</th><th>Out Date</th><th>Out Kgs</th><th>Rolls</th><th>Loss %</th></tr></thead>
             <tbody>
-              <tr><td>Yarn Received</td><td>{fmtDate(yarn?.received_date)}</td><td>{yarn?.supplier_name || '—'}</td>
-                  <td className="mono">{yarn?.yarn_kgs || '—'}</td><td>—</td></tr>
-              {PROCESS_STAGES.map(s => {
-                const p = getP(s)
+              {stages.map(s => {
+                const p = processes.find(x => x.process_name === s)
                 return <tr key={s}>
                   <td>{s}</td>
-                  <td>{fmtDate(p?.outward_date || p?.inward_date)}</td>
                   <td>{p?.vendor_name || '—'}</td>
+                  <td>{fmtDate(p?.inward_date)}</td>
+                  <td className="mono">{p?.inward_kgs || '—'}</td>
+                  <td>{fmtDate(p?.outward_date)}</td>
                   <td className="mono">{p?.outward_kgs || '—'}</td>
+                  <td className="mono">{p?.rolls || '—'}</td>
                   <td className="mono">{p?.loss_percent ? num(p.loss_percent).toFixed(2) + '%' : '—'}</td>
                 </tr>
               })}
-              <tr><td className="strong">Fabric Inhouse</td><td>{fmtDate(inhouse?.inhouse_date)}</td>
-                  <td>Amoga FG Store</td><td className="mono strong">{inhouse?.final_kgs || '—'}</td><td>—</td></tr>
+              <tr><td className="strong">Fabric Inhouse</td><td>Amoga FG Store</td>
+                <td colSpan={2}>{fmtDate(inhouse?.inhouse_date)}</td>
+                <td></td><td className="mono strong">{inhouse?.final_kgs || '—'}</td>
+                <td className="mono">{inhouse?.rolls || '—'}</td><td>—</td></tr>
+            </tbody>
+          </table>
+        </section>
+
+        {rollWarnings.length > 0 && (
+          <section className="report-section">
+            <h3 style={{ color: '#B3261E' }}>⚠ Roll Count Discrepancies</h3>
+            {rollWarnings.map((w, i) => (
+              <div key={i} style={{ fontSize: 12, color: '#B3261E', padding: '3px 0' }}>{w.message}</div>
+            ))}
+          </section>
+        )}
+
+        <section className="report-section">
+          <h3>Summary</h3>
+          <table className="report-table">
+            <tbody>
+              <tr><td>Grey Fabric Allocated</td><td className="mono">{greyKgs.toFixed(1)} kgs</td>
+                  <td>Inhouse Qty</td><td className="mono strong">{inhouse?.final_kgs || '—'} kgs</td></tr>
+              <tr><td>Total Loss %</td><td className="mono strong">{totalLossP.toFixed(2)}%</td>
+                  <td>Total Rolls</td><td className="mono">{inhouse?.rolls || '—'}</td></tr>
+              <tr><td>QC / Shade</td><td>{inhouse ? `${inhouse.qc_status} / ${inhouse.shade_status}` : '—'}</td>
+                  <td>Total Days</td><td className="mono">{totalDays} days</td></tr>
             </tbody>
           </table>
         </section>

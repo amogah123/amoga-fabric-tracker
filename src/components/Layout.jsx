@@ -2,12 +2,14 @@ import React, { useState } from 'react'
 import { NavLink, Outlet, useLocation } from 'react-router-dom'
 import {
   LayoutDashboard, Package, PlusCircle, ClipboardList,
-  FileText, Settings, Factory, Menu as MenuIcon, X
+  FileText, Settings, Factory, Menu as MenuIcon, X, Layers, Scissors
 } from 'lucide-react'
 import { Toast } from './ui'
 
 const NAV = [
   { to: '/',              label: 'Dashboard',     Icon: LayoutDashboard },
+  { to: '/yarn',          label: 'Yarn Stock',    Icon: Layers },
+  { to: '/knitting',      label: 'Knitting',      Icon: Scissors },
   { to: '/orders',        label: 'Orders',        Icon: Package },
   { to: '/new-order',     label: 'New Order',     Icon: PlusCircle },
   { to: '/process-entry', label: 'Process Entry', Icon: ClipboardList },
@@ -19,7 +21,7 @@ const BOTTOM_NAV = [
   { to: '/',              label: 'Home',    Icon: LayoutDashboard },
   { to: '/orders',        label: 'Orders',  Icon: Package },
   { to: '/process-entry', label: 'Add',     Icon: PlusCircle, primary: true },
-  { to: '/reports',       label: 'Reports', Icon: FileText },
+  { to: '/yarn',          label: 'Yarn',    Icon: Layers },
   { to: '/settings',      label: 'Menu',    Icon: Settings },
 ]
 
@@ -29,11 +31,13 @@ export default function Layout({ toast }) {
 
   const pageTitle = (() => {
     const map = {
-      '/': 'Dashboard', '/orders': 'All Orders', '/new-order': 'Create New Order',
+      '/': 'Dashboard', '/yarn': 'Yarn Stock', '/knitting': 'Knitting Batches',
+      '/orders': 'All Orders', '/new-order': 'Create New Order',
       '/process-entry': 'Process Entry', '/reports': 'Reports', '/settings': 'Settings',
     }
     if (location.pathname.includes('/report')) return 'Order Closing Report'
     if (location.pathname.startsWith('/orders/')) return 'Order Detail'
+    if (location.pathname.startsWith('/knitting/')) return 'Batch Detail'
     return map[location.pathname] || ''
   })()
 
@@ -41,10 +45,7 @@ export default function Layout({ toast }) {
 
   return (
     <div className="app-root">
-      {/* Overlay */}
       {sideOpen && <div className="overlay" onClick={() => setSideOpen(false)} />}
-
-      {/* Sidebar */}
       <aside className={`sidebar ${sideOpen ? 'open' : ''}`}>
         <div className="brand">
           <div className="brand-mark"><Factory size={22} strokeWidth={2.25} /></div>
@@ -56,46 +57,35 @@ export default function Layout({ toast }) {
         </div>
         <nav className="nav">
           {NAV.map(({ to, label, Icon }) => (
-            <NavLink
-              key={to} to={to} end={to === '/'}
+            <NavLink key={to} to={to} end={to === '/'}
               className={({ isActive }) => `nav-btn ${isActive ? 'active' : ''}`}
-              onClick={() => setSideOpen(false)}
-            >
+              onClick={() => setSideOpen(false)}>
               <Icon size={18} strokeWidth={2} /><span>{label}</span>
             </NavLink>
           ))}
         </nav>
         <div className="side-footer">
           <div className="dept-tag">FABRIC DEPT</div>
-          <div className="version">v1.0</div>
+          <div className="version">v2.0</div>
         </div>
       </aside>
-
-      {/* Main area */}
       <main className="main">
         <header className="topbar">
           <button className="menu-btn" onClick={() => setSideOpen(true)}><MenuIcon size={22} /></button>
           <div className="topbar-title">{pageTitle}</div>
           <div className="topbar-date">{todayStr}</div>
         </header>
-        <div className="content">
-          <Outlet />
-        </div>
+        <div className="content"><Outlet /></div>
       </main>
-
-      {/* Bottom nav (mobile) */}
       <nav className="bottom-nav">
         {BOTTOM_NAV.map(({ to, label, Icon, primary }) => (
-          <NavLink
-            key={to} to={to} end={to === '/'}
-            className={({ isActive }) => `bn-btn ${isActive ? 'active' : ''} ${primary ? 'primary' : ''}`}
-          >
+          <NavLink key={to} to={to} end={to === '/'}
+            className={({ isActive }) => `bn-btn ${isActive ? 'active' : ''} ${primary ? 'primary' : ''}`}>
             <Icon size={primary ? 26 : 22} strokeWidth={2} />
             <span>{label}</span>
           </NavLink>
         ))}
       </nav>
-
       <Toast {...toast} />
     </div>
   )
